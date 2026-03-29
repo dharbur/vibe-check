@@ -39,18 +39,6 @@ function getVibeScoreStyle(vibeScore: number) {
   return 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200 hover:border-emerald-400/70 hover:shadow-[0_0_30px_rgba(52,211,153,0.18)]'
 }
 
-function getVibeScoreRoast(vibeScore: number) {
-  if (vibeScore < 40) {
-    return 'Who hurt you? And then who let you code?'
-  }
-
-  if (vibeScore <= 70) {
-    return 'It works. Barely. Touch it and it cries.'
-  }
-
-  return "Solid. Your future self won't hate you for this."
-}
-
 function App() {
   const [repoUrl, setRepoUrl] = useState('')
   const [codeInput, setCodeInput] = useState('')
@@ -106,7 +94,6 @@ function App() {
 
   const verdictStyle = result ? verdictStyles[result.verdict] : null
   const vibeScoreStyle = result ? getVibeScoreStyle(result.vibeScore) : null
-  const vibeScoreRoast = result ? getVibeScoreRoast(result.vibeScore) : null
   const isLoading = loadingPhase !== 'idle'
   const buttonLabel =
     loadingPhase === 'fetching-repo'
@@ -188,7 +175,7 @@ function App() {
           </div>
         </div>
 
-        {result && verdictStyle && vibeScoreStyle && vibeScoreRoast ? (
+        {result && verdictStyle && vibeScoreStyle ? (
           <div ref={resultsRef} className="mt-10 space-y-6">
             <div
               className={`rounded-3xl border-2 px-6 py-8 text-center shadow-2xl shadow-black/20 transition-all duration-300 ease-out ${vibeScoreStyle}`}
@@ -200,7 +187,7 @@ function App() {
                 {result.vibeScore}/100
               </p>
               <p className="mt-3 text-sm italic text-current/90">
-                {vibeScoreRoast}
+                {result.roast}
               </p>
             </div>
 
@@ -242,6 +229,18 @@ function App() {
               <p className="mt-3 text-2xl font-black tracking-tight sm:text-3xl">
                 {verdictStyle.icon} {result.verdict}
               </p>
+              {result.verdict === 'Fix this first' ? (
+                <div className="mt-5 border-t border-current/20 pt-4">
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-current/90">
+                    What to fix
+                  </p>
+                  <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-current/90">
+                    {result.whatToFix.map((fix) => (
+                      <li key={fix}>{fix}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}

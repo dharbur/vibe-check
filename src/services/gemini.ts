@@ -1,7 +1,7 @@
 export const GEMINI_MODEL = 'gemini-flash-latest'
 
 export const GEMINI_SYSTEM_PROMPT =
-  'You are a brutally honest senior developer. Review the code and respond in JSON with exactly these keys: willItBreak, willItGetHacked, isItOverengineered, vibeScore, verdict. Each of willItBreak, willItGetHacked, isItOverengineered should be a short 2-3 sentence brutal honest assessment. vibeScore should be a number from 0 to 100. Verdict should be exactly one of: Ship it, Fix this first, or Burn it down.'
+  'You are a brutally honest senior developer. Review the code and respond in JSON with exactly these keys: willItBreak, willItGetHacked, isItOverengineered, vibeScore, roast, verdict, whatToFix. Each of willItBreak, willItGetHacked, isItOverengineered should be a short 2-3 sentence brutal honest assessment. vibeScore should be a number from 0 to 100. roast should be a single savage funny one-liner about the code. verdict should be exactly one of: Ship it, Fix this first, or Burn it down. whatToFix should always be an array of exactly 3 specific actionable fix strings when verdict is Fix this first, otherwise return an empty array.'
 
 export type VibeCheckVerdict = 'Ship it' | 'Fix this first' | 'Burn it down'
 
@@ -10,7 +10,9 @@ export interface VibeCheckResponse {
   willItGetHacked: string
   isItOverengineered: string
   vibeScore: number
+  roast: string
   verdict: VibeCheckVerdict
+  whatToFix: string[]
 }
 
 export interface VibeCheckInput {
@@ -60,11 +62,14 @@ function parseVibeCheckResponse(rawText: string): VibeCheckResponse {
   const response = parsed as Record<string, unknown>
   const verdict = response.verdict
   const vibeScore = Number(response.vibeScore)
+  const roast = response.roast
+  const whatToFix = response.whatToFix
 
   if (
     typeof response.willItBreak !== 'string' ||
     typeof response.willItGetHacked !== 'string' ||
-    typeof response.isItOverengineered !== 'string'
+    typeof response.isItOverengineered !== 'string' ||
+    typeof roast !== 'string'
   ) {
     throw new Error('Gemini response is missing one or more review sections.')
   }
@@ -81,12 +86,26 @@ function parseVibeCheckResponse(rawText: string): VibeCheckResponse {
     throw new Error('Gemini response returned an invalid verdict.')
   }
 
+  if (!Array.isArray(whatToFix) || whatToFix.some((item) => typeof item !== 'string')) {
+    throw new Error('Gemini response returned an invalid whatToFix list.')
+  }
+
+  if (verdict === 'Fix this first' && whatToFix.length !== 3) {
+    throw new Error('Gemini response must return exactly 3 fixes for "Fix this first".')
+  }
+
+  if (verdict !== 'Fix this first' && whatToFix.length > 0) {
+    throw new Error('Gemini response should only include fixes for "Fix this first".')
+  }
+
   return {
     willItBreak: response.willItBreak,
     willItGetHacked: response.willItGetHacked,
     isItOverengineered: response.isItOverengineered,
     vibeScore,
+    roast,
     verdict,
+    whatToFix,
   }
 }
 
