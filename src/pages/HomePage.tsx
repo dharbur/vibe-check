@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import AuthModal from '../components/AuthModal'
 import { useAuth } from '../lib/auth'
 import { fetchGitHubRepoCode } from '../services/github'
 import {
@@ -53,7 +53,6 @@ function getScoreAppearance(vibeScore: number) {
 function HomePage() {
   const animationFrameRef = useRef<number | null>(null)
   const resultsRef = useRef<HTMLDivElement | null>(null)
-  const navigate = useNavigate()
   const { user, loading: authLoading, signOut, isConfigured, configError } = useAuth()
   const [repoUrl, setRepoUrl] = useState('')
   const [codeInput, setCodeInput] = useState('')
@@ -61,6 +60,7 @@ function HomePage() {
     'idle' | 'fetching-repo' | 'checking-vibes'
   >('idle')
   const [animatedScore, setAnimatedScore] = useState(0)
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [result, setResult] = useState<VibeCheckResponse | null>(null)
 
@@ -79,7 +79,7 @@ function HomePage() {
     }
 
     if (!user) {
-      navigate('/auth?next=%2F')
+      setIsAuthModalOpen(true)
       return
     }
 
@@ -183,11 +183,15 @@ function HomePage() {
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#080808] text-white">
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(circle_at_top,rgba(217,70,239,0.16),transparent_50%)]" />
       <div className="pointer-events-none absolute right-0 top-24 h-72 w-72 rounded-full bg-[#818cf8]/10 blur-3xl" />
 
       <section className="relative z-10 mx-auto flex min-h-screen w-full max-w-6xl flex-col justify-start px-6 py-16 sm:px-8 sm:py-20 lg:px-10">
-        <div className="mb-14 flex flex-col gap-10 lg:flex-row lg:items-start lg:justify-between">
+        <div className="mb-14 flex items-start justify-between gap-6">
           <div className="max-w-3xl">
             <p className="font-display inline-flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#d946ef]">
               <span className="vibe-dot h-[6px] w-[6px]" />
@@ -207,43 +211,29 @@ function HomePage() {
             </p>
           </div>
 
-          <div className="editorial-surface flex min-w-[280px] max-w-sm flex-col gap-4 rounded-[24px] p-5">
-            <p className="font-mono-ui text-[11px] uppercase tracking-[0.18em] text-white/46">
-              Session
-            </p>
-            {authLoading ? (
-              <p className="font-mono-ui text-[12px] leading-6 text-white/56">
-                Checking authentication...
-              </p>
-            ) : user ? (
+          <div className="flex shrink-0 items-center gap-3">
+            {user ? (
               <>
-                <p className="font-display text-sm font-semibold text-white">
-                  Signed in as
-                </p>
-                <p className="font-mono-ui break-all text-[12px] leading-6 text-white/62">
+                <p className="font-mono-ui hidden max-w-[220px] truncate text-[11px] text-white/46 sm:block">
                   {user.email}
                 </p>
                 <button
                   type="button"
                   onClick={handleSignOut}
-                  className="font-display inline-flex items-center justify-center rounded-full border border-white/10 px-4 py-2 text-sm text-white/80 transition hover:border-white/18 hover:text-white"
+                  className="font-display inline-flex items-center rounded-full border border-white/10 px-4 py-2 text-sm text-white/76 transition hover:border-white/18 hover:text-white"
                 >
                   Sign out
                 </button>
               </>
             ) : (
-              <>
-                <p className="font-mono-ui text-[12px] leading-6 text-white/56">
-                  Sign in before running a vibe check. The landing page stays public,
-                  but the review action is protected.
-                </p>
-                <Link
-                  to="/auth?next=%2F"
-                  className="font-display inline-flex items-center justify-center rounded-full border border-white/10 px-4 py-2 text-sm text-white/80 transition hover:border-white/18 hover:text-white"
-                >
-                  Open auth page
-                </Link>
-              </>
+              <button
+                type="button"
+                onClick={() => setIsAuthModalOpen(true)}
+                disabled={authLoading}
+                className="font-display inline-flex items-center rounded-full border border-white/10 px-4 py-2 text-sm text-white/76 transition hover:border-white/18 hover:text-white disabled:opacity-60"
+              >
+                Sign in
+              </button>
             )}
           </div>
         </div>
@@ -285,8 +275,8 @@ function HomePage() {
 
             {!user && isConfigured ? (
               <p className="font-mono-ui text-[12px] leading-6 text-white/48">
-                You can explore the UI without an account, but you will be redirected
-                to sign in before the review runs.
+                You can explore the UI without an account, but the sign-in modal
+                will appear before the review runs.
               </p>
             ) : null}
 
