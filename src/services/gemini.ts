@@ -1,7 +1,8 @@
-export const GEMINI_MODEL = 'gemini-flash-latest'
-
-export const GEMINI_SYSTEM_PROMPT =
-  'You are a brutally honest senior developer. Review the code and respond in JSON with exactly these keys: willItBreak, willItGetHacked, isItOverengineered, vibeScore, roast, verdict, whatToFix. Each of willItBreak, willItGetHacked, isItOverengineered should be a short 2-3 sentence brutal honest assessment. vibeScore should be a number from 0 to 100. roast should be a single savage funny one-liner about the code. verdict should be exactly one of: Ship it, Fix this first, or Burn it down. whatToFix should always be an array of exactly 3 specific actionable fix strings when verdict is Fix this first, otherwise return an empty array.'
+import {
+  getSupabaseFunctionUrl,
+  requireSupabaseConfig,
+  supabase,
+} from '../lib/supabase'
 
 export type VibeCheckVerdict = 'Ship it' | 'Fix this first' | 'Burn it down'
 
@@ -20,43 +21,9 @@ export interface VibeCheckInput {
   code: string
 }
 
-interface GeminiGenerateContentResponse {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{
-        text?: string
-      }>
-    }
-  }>
-  error?: {
-    message?: string
-  }
-}
-
-function extractJsonText(text: string) {
-  const trimmedText = text.trim()
-
-  if (trimmedText.startsWith('```')) {
-    return trimmedText
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/, '')
-      .trim()
-  }
-
-  return trimmedText
-}
-
-function parseVibeCheckResponse(rawText: string): VibeCheckResponse {
-  let parsed: unknown
-
-  try {
-    parsed = JSON.parse(extractJsonText(rawText))
-  } catch {
-    throw new Error('Gemini returned invalid JSON.')
-  }
-
+function parseVibeCheckResponse(parsed: unknown): VibeCheckResponse {
   if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Gemini returned an invalid response shape.')
+    throw new Error('Vibe check returned an invalid response shape.')
   }
 
   const response = parsed as Record<string, unknown>
@@ -69,13 +36,14 @@ function parseVibeCheckResponse(rawText: string): VibeCheckResponse {
     typeof response.willItBreak !== 'string' ||
     typeof response.willItGetHacked !== 'string' ||
     typeof response.isItOverengineered !== 'string' ||
-    typeof roast !== 'string'
+    typeof roast !== 'string' ||
+    roast.trim().length === 0
   ) {
-    throw new Error('Gemini response is missing one or more review sections.')
+    throw new Error('Vibe check response is missing one or more review sections.')
   }
 
   if (!Number.isFinite(vibeScore)) {
-    throw new Error('Gemini response is missing a valid vibe score.')
+    throw new Error('Vibe check response is missing a valid vibe score.')
   }
 
   if (
@@ -83,19 +51,19 @@ function parseVibeCheckResponse(rawText: string): VibeCheckResponse {
     verdict !== 'Fix this first' &&
     verdict !== 'Burn it down'
   ) {
-    throw new Error('Gemini response returned an invalid verdict.')
+    throw new Error('Vibe check response returned an invalid verdict.')
   }
 
   if (!Array.isArray(whatToFix) || whatToFix.some((item) => typeof item !== 'string')) {
-    throw new Error('Gemini response returned an invalid whatToFix list.')
+    throw new Error('Vibe check response returned an invalid whatToFix list.')
   }
 
   if (verdict === 'Fix this first' && whatToFix.length !== 3) {
-    throw new Error('Gemini response must return exactly 3 fixes for "Fix this first".')
+    throw new Error('Vibe check response must return exactly 3 fixes for "Fix this first".')
   }
 
   if (verdict !== 'Fix this first' && whatToFix.length > 0) {
-    throw new Error('Gemini response should only include fixes for "Fix this first".')
+    throw new Error('Vibe check response should only include fixes for "Fix this first".')
   }
 
   return {
@@ -112,7 +80,6 @@ function parseVibeCheckResponse(rawText: string): VibeCheckResponse {
 export async function runVibeCheck(
   input: VibeCheckInput,
 ): Promise<VibeCheckResponse> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY ?? ''
   const trimmedRepoUrl = input.repoUrl.trim()
   const trimmedCode = input.code.trim()
 
@@ -120,54 +87,40 @@ export async function runVibeCheck(
     throw new Error('Provide a GitHub repo URL or paste some code first.')
   }
 
-  if (!apiKey) {
-    throw new Error('Missing Gemini API key. Add VITE_GEMINI_API_KEY to your .env file.')
+  requireSupabaseConfig()
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  if (!session?.access_token) {
+    throw new Error('Sign in before running a vibe check.')
   }
 
-  const contentToReview = trimmedCode || trimmedRepoUrl
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
-  const requestBody = {
-    system_instruction: {
-      parts: [{ text: GEMINI_SYSTEM_PROMPT }],
-    },
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: contentToReview }],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-    },
-  }
-
-  const response = await fetch(endpoint, {
+  const response = await fetch(getSupabaseFunctionUrl('vibe-check'), {
     method: 'POST',
     headers: {
+      Authorization: `Bearer ${session.access_token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(requestBody),
+    body: JSON.stringify({
+      repoUrl: trimmedRepoUrl,
+      code: trimmedCode,
+    }),
   })
 
-  const responseBody =
-    (await response.json().catch(() => null)) as GeminiGenerateContentResponse | null
+  const responseBody = (await response.json().catch(() => null)) as
+    | Record<string, unknown>
+    | null
 
   if (!response.ok) {
     const errorMessage =
-      responseBody?.error?.message ||
-      `Gemini request failed with status ${response.status}.`
+      (typeof responseBody?.error === 'string' && responseBody.error) ||
+      (typeof responseBody?.message === 'string' && responseBody.message) ||
+      `Vibe check request failed with status ${response.status}.`
 
     throw new Error(errorMessage)
   }
 
-  const generatedText = responseBody?.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text ?? '')
-    .join('')
-    .trim()
-
-  if (!generatedText) {
-    throw new Error('Gemini returned an empty response.')
-  }
-
-  return parseVibeCheckResponse(generatedText)
+  return parseVibeCheckResponse(responseBody)
 }
