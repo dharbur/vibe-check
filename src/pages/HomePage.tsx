@@ -273,13 +273,6 @@ function HomePage() {
               />
             </div>
 
-            {!user && isConfigured ? (
-              <p className="font-mono-ui text-[12px] leading-6 text-white/48">
-                You can explore the UI without an account, but the sign-in modal
-                will appear before the review runs.
-              </p>
-            ) : null}
-
             {errorMessage ? (
               <p className="font-mono-ui text-[12px] leading-6 text-[#ff8f98]">
                 {errorMessage}
