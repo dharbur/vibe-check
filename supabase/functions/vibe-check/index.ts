@@ -1,7 +1,11 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
-const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-3.6-flash']
+// Verified working against this project's API key. The GEMINI_MODEL secret is tried first when set.
+const GEMINI_FALLBACK_MODELS = ['gemini-3.5-flash', 'gemini-3.6-flash']
+
+// 404 covers models that exist but are not served to this key, so they hand off like an overload does.
+const GEMINI_RETRYABLE_STATUSES = new Set([404, 429, 503])
 const GEMINI_SYSTEM_PROMPT =
   'You are a brutally honest senior developer. Review the code and respond in JSON with exactly these keys: willItBreak, willItGetHacked, isItOverengineered, vibeScore, roast, verdict, whatToFix. Each of willItBreak, willItGetHacked, isItOverengineered should be a short 2-3 sentence brutal honest assessment. vibeScore should be a number from 0 to 100. roast should be a single savage funny one-liner about the code. verdict should be exactly one of: Ship it, Fix this first, or Burn it down. whatToFix should always be an array of exactly 3 specific actionable fix strings when verdict is Fix this first, otherwise return an empty array.'
 
@@ -64,6 +68,19 @@ const GEMINI_RESPONSE_SCHEMA = {
     'whatToFix',
   ],
 } as const
+
+function resolveGeminiModels() {
+  const configuredModel = Deno.env.get('GEMINI_MODEL')?.trim()
+
+  if (!configuredModel) {
+    return GEMINI_FALLBACK_MODELS
+  }
+
+  return [
+    configuredModel,
+    ...GEMINI_FALLBACK_MODELS.filter((model) => model !== configuredModel),
+  ]
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -311,7 +328,7 @@ Deno.serve(async (req: Request) => {
     let geminiResponse: Response | null = null
     let geminiBody: GeminiGenerateContentResponse | null = null
 
-    for (const model of GEMINI_MODELS) {
+    for (const model of resolveGeminiModels()) {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`
 
       geminiResponse = await fetch(endpoint, {
@@ -325,8 +342,15 @@ Deno.serve(async (req: Request) => {
       geminiBody =
         (await geminiResponse.json().catch(() => null)) as GeminiGenerateContentResponse | null
 
-      // 429 and 503 mean the model is rate limited or overloaded, so the next model gets a turn.
-      if (geminiResponse.status !== 429 && geminiResponse.status !== 503) {
+      if (!geminiResponse.ok) {
+        console.error('gemini call failed', {
+          model,
+          status: geminiResponse.status,
+          message: geminiBody?.error?.message ?? null,
+        })
+      }
+
+      if (!GEMINI_RETRYABLE_STATUSES.has(geminiResponse.status)) {
         break
       }
     }
@@ -345,6 +369,7 @@ Deno.serve(async (req: Request) => {
       .trim()
 
     if (!generatedText) {
+      console.error('gemini returned no text parts', JSON.stringify(geminiBody).slice(0, 2000))
       return jsonResponse({ error: 'Gemini returned an empty response.' }, 500)
     }
 
