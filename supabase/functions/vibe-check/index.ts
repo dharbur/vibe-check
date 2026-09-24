@@ -1,7 +1,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
-const GEMINI_MODEL = 'gemini-1.5-flash'
+const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-3.6-flash']
 const GEMINI_SYSTEM_PROMPT =
   'You are a brutally honest senior developer. Review the code and respond in JSON with exactly these keys: willItBreak, willItGetHacked, isItOverengineered, vibeScore, roast, verdict, whatToFix. Each of willItBreak, willItGetHacked, isItOverengineered should be a short 2-3 sentence brutal honest assessment. vibeScore should be a number from 0 to 100. roast should be a single savage funny one-liner about the code. verdict should be exactly one of: Ship it, Fix this first, or Burn it down. whatToFix should always be an array of exactly 3 specific actionable fix strings when verdict is Fix this first, otherwise return an empty array.'
 
@@ -292,37 +292,49 @@ Deno.serve(async (req: Request) => {
     }
 
     const contentToReview = trimmedCode || trimmedRepoUrl
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiApiKey}`
-
-    const geminiResponse = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const geminiRequestBody = JSON.stringify({
+      system_instruction: {
+        parts: [{ text: GEMINI_SYSTEM_PROMPT }],
       },
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: GEMINI_SYSTEM_PROMPT }],
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: contentToReview }],
         },
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: contentToReview }],
-          },
-        ],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: GEMINI_RESPONSE_SCHEMA,
-        },
-      }),
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: GEMINI_RESPONSE_SCHEMA,
+      },
     })
 
-    const geminiBody =
-      (await geminiResponse.json().catch(() => null)) as GeminiGenerateContentResponse | null
+    let geminiResponse: Response | null = null
+    let geminiBody: GeminiGenerateContentResponse | null = null
 
-    if (!geminiResponse.ok) {
+    for (const model of GEMINI_MODELS) {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`
+
+      geminiResponse = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: geminiRequestBody,
+      })
+
+      geminiBody =
+        (await geminiResponse.json().catch(() => null)) as GeminiGenerateContentResponse | null
+
+      // 429 and 503 mean the model is rate limited or overloaded, so the next model gets a turn.
+      if (geminiResponse.status !== 429 && geminiResponse.status !== 503) {
+        break
+      }
+    }
+
+    if (!geminiResponse?.ok) {
       const errorMessage =
         geminiBody?.error?.message ||
-        `Gemini request failed with status ${geminiResponse.status}.`
+        `Gemini request failed with status ${geminiResponse?.status ?? 'unknown'}.`
 
       return jsonResponse({ error: errorMessage }, 500)
     }
